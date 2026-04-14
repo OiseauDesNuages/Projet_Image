@@ -25,7 +25,7 @@ img = img_gris.astype(np.float32) / 255.0
 def wls_filter_gray(img, lamb, alpha, eps): #retourne une image de meme taille que img avec wls appliqué en niveau de gris
     
     #img : en gris flottant (decimaux entre 0 et 1) 
-    #lamb : valeur de lambda parametre de lissage (entre 0 et 1) (plus il est grand plus on lisse)
+    #lamb : valeur de lambda parametre de lissage (>0) (plus il est grand plus on lisse)
     #alpha : parametre de sensibilité du gradient (entre 1.2 et 2)
     #eps : pour empecher la division par 0
 
@@ -103,9 +103,34 @@ plt.title(f"Couche de base (lambda={3} et alpha ={1.5})")
 plt.axis('off')
 
 plt.subplot(2, 2, 4)
-plt.imshow(wls_filter_gray(img, 50, 1.5, 1e-4), cmap='jet', vmin=0, vmax=1)
+plt.imshow(wls_filter_gray(img, 8, 1.5, 1e-4), cmap='jet', vmin=0, vmax=1)
 plt.title(f"Couche de base (lambda={8} et alpha ={1.5})")
 plt.axis('off')
 
 plt.show()
+
+
+#affichage avec couche de détails
+img_base = wls_filter_gray(img, lamb=0.5, alpha=1.5, eps=1e-4)
+
+#extrait de la couche de détails (d = g - u)
+couche_detail_1 = img - img_base
+
+plt.figure(figsize=(10, 5))
+
+
+plt.subplot(1, 2, 1)
+plt.imshow(img_base, cmap='gray', vmin=0, vmax=1) #en gris sinon pas beau
+plt.title("Couche de base")
+plt.axis('off')
+
+
+plt.subplot(1, 2, 2)
+plt.imshow(couche_detail_1 + 0.5, cmap='gray', vmin=0, vmax=1) #+0.5 pour eviter le plus de valeurs negatives (si d'autres sont en dehors de 0 et 1 apres ça, elles seront gérées par vmin et vmax)
+plt.title("Couche de détails 1")
+plt.axis('off')
+
+plt.show()
+
+
 
