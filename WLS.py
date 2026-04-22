@@ -1,85 +1,133 @@
 import numpy as np
 import cv2
-from scipy import sparse
+from scipy.sparse import diags, eye
 from scipy.sparse.linalg import spsolve
-
-def wls_filter(img, lamb=1.0, alpha=1.2, eps=1e-4):
-    """
-    Application du lissage Edge-Preserving via Weighted Least Squares.
-    
-    Arguments:
-        img   : Image d'entrée (0 à 1, float).
-        lamb  : Paramètre de lissage (lambda). Plus il est grand, plus c'est lisse.
-        alpha : Contrôle la sensibilité aux gradients (typiquement 1.2 à 2.0).
-        eps   : Petite valeur pour éviter la division par zéro.
-    """
-    L = img.astype(np.float64)
-    if len(L.shape) == 3:
-        # On utilise la luminance pour calculer les poids si l'image est en couleur
-        # mais on traite généralement chaque canal séparément.
-        gray = cv2.cvtColor((L * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY) / 255.0
-    else:
-        gray = L
-
-    r, c = gray.shape
-    k = r * c
-
-    # 1. Calcul des gradients logarithmiques (pour la sensibilité aux bords)
-    # On calcule les différences horizontales et verticales
-    dy = np.diff(gray, axis=0)
-    dx = np.diff(gray, axis=1)
-
-    # Padding pour garder la même taille que l'image d'origine
-    dy = -lamb / (np.abs(dy)**alpha + eps)
-    dx = -lamb / (np.abs(dx)**alpha + eps)
-    
-    dy = np.pad(dy, ((0, 1), (0, 0)), 'constant')
-    dx = np.pad(dx, ((0, 0), (0, 1)), 'constant')
-
-    # Construction des vecteurs pour la matrice diagonale
-    dy = dy.flatten()
-    dx = dx.flatten()
-
-    # 2. Construction de la matrice de lissage (Laplacienne inhomogène)
-    # On crée une matrice creuse à 5 diagonales
-    # La diagonale principale contient 1 - (somme des poids adjacents)
-    w = np.pad(dx[:-1], (1, 0), 'constant') # poids gauche
-    n = np.pad(dy[:-c], (c, 0), 'constant') # poids haut
-    
-    # Diagonale principale (I + lambda * Lg)
-    # Note: On soustrait les poids car dx et dy sont déjà multipliés par -lambda
-    d = 1 - (dx + w + dy + n)
-
-    data = np.stack([n, w, d, dx, dy])
-    diags = np.array([-c, -1, 0, 1, c])
-    A = sparse.spdiags(data, diags, k, k).tocsr()
-
-    # 3. Résolution du système pour chaque canal
-    out = np.zeros_like(L)
-    if len(L.shape) == 3:
-        for i in range(3):
-            out[:, :, i] = spsolve(A, L[:, :, i].flatten()).reshape(r, c)
-    else:
-        out = spsolve(A, L.flatten()).reshape(r, c)
-
-    return np.clip(out, 0, 1)
-
-
-# Charger l'image et normaliser entre 0 et 1
-image = cv2.imread('mountain.jpg')
-image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) / 255.0
-
-# Extraire la couche de base (base layer)
-# Pour l'abstraction d'image, on utilise souvent un lambda élevé et alpha=2.0
-base = wls_filter(image, lamb=2.0, alpha=2.0)
-
-# Extraire les détails (detail layer)
-detail = image - base
-
-# Affichage (exemple avec Matplotlib)
 import matplotlib.pyplot as plt
-plt.figure(figsize=(15, 5))
-plt.subplot(131), plt.imshow(image), plt.title('Original')
-plt.subplot(132), plt.imshow(base), plt.title('Base (Lissage WLS)')
-plt.subplot(133), plt.imshow(detail + 0.5), plt.title('Détails (accentués)')
+
+# img_test = np.array([
+#     [0.1, 0.1,0.1,0.9, 0.9, 0.9, 0.9],
+#     [0.1, 0.1,0.1,0.9, 0.9, 0.9, 0.9],
+#     [0.1, 0.1,0.1,0.9, 0.9, 0.9, 0.9],
+#     [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
+#     [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
+#     [0.1, 0.1, 0.1, 0.1, 0.1, 0.1,0.1]
+# ])
+
+
+img_test = cv2.imread('photo_de_test.png') #ATTENTION : opencv est en couleur BGR
+img_gris = cv2.cvtColor(img_test, cv2.COLOR_BGR2GRAY)
+
+
+# On passe d'une échelle [0, 255] (entiers) à [0.0, 1.0] (décimaux)
+img = img_gris.astype(np.float32) / 255.0
+# variables
+
+def wls_filter_gray(img, lamb, alpha, eps): #retourne une image de meme taille que img avec wls appliqué en niveau de gris
+    
+    #img : en gris flottant (decimaux entre 0 et 1) 
+    #lamb : valeur de lambda parametre de lissage (>0) (plus il est grand plus on lisse)
+    #alpha : parametre de sensibilité du gradient (entre 1.2 et 2)
+    #eps : pour empecher la division par 0
+
+    nb_l, nb_c = img.shape
+    nb_p = nb_l * nb_c 
+
+
+    # Construction de Dx tq : 'u(p+1) - u(p)' derivee horizontale (p+1 = (x+1, y))
+    dx_main = -np.ones(nb_p)
+    dx_plus1 = np.ones(nb_p)
+
+    # gestion des bords : On met donc la différence à 0 pour la dernière colonne de chaque ligne.
+    dx_main[nb_c-1::nb_c] = 0
+    dx_plus1[nb_c-1::nb_c] = 0
+
+
+    Dx = diags([dx_main, dx_plus1], [0, 1], shape=(nb_p, nb_p))   #diags gere directement ou placer la "double" diagonale avec "[0, 1]"
+
+    # Construction de Dy tq : 'u(p+nb_c) - u(p)' derivee horizontale (p+nb_c = (x, y+1))
+    dy_main = -np.ones(nb_p)
+    dy_plus_nbc = np.ones(nb_p)
+
+    ####################
+    #dmd explication pour gerer Dy
+
+    #gestionn des bords : on mets le dernier pixel de chaque colonne a 0
+    dy_main[-nb_c:] = 0 
+    Dy = diags([dy_main, dy_plus_nbc], [0, nb_c], shape=(nb_p, nb_p))
+
+    #passage en logluminescence
+    L = np.log(img + 1e-4)
+    L_flat = L.flatten()
+
+    grad_x = Dx @ L_flat
+    grad_y = Dy @ L_flat
+
+    #Calculs des coefs ax et ay
+    ax = 1 / (np.abs(grad_x)**alpha + eps)
+    ay = 1 / (np.abs(grad_y)**alpha + eps)
+
+    #Construction des matrices de poids
+    Ax = diags([ax], [0], shape=(nb_p, nb_p))
+    Ay = diags([ay], [0], shape=(nb_p, nb_p))
+
+    # Matrice Lg
+    Lg = Dx.T @ Ax @ Dx + Dy.T @ Ay @ Dy
+
+    # Résolution du système linéaire : (I + lambda * Lg) * u = g
+    I = eye(nb_p) # Matrice identité creuse
+    A_sys = I + lamb * Lg
+    g = img.flatten()
+
+    #A_sys en format csr (condensed sparse row -> format des matrices creuses ) pour spsolve
+    A_sys = A_sys.tocsr()
+    u_flat = spsolve(A_sys, g)
+    img_lisse = u_flat.reshape((nb_l, nb_c))
+
+    return img_lisse
+
+# Affichage en couleur
+plt.figure(figsize=(10, 5))
+plt.subplot(2, 2, 1)
+plt.imshow(img, cmap='jet', vmin=0, vmax=1)
+plt.title("Image originale")
+plt.axis('off')
+
+plt.subplot(2, 2 ,2)
+plt.imshow(wls_filter_gray(img, 0.5, 1.5, 1e-4), cmap='jet', vmin=0, vmax=1)
+plt.title(f"Couche de base (lambda={0.5} et alpha ={1.5})")
+plt.axis('off')
+
+plt.subplot(2, 2, 3)
+plt.imshow(wls_filter_gray(img, 3, 1.5, 1e-4), cmap='jet', vmin=0, vmax=1)
+plt.title(f"Couche de base (lambda={3} et alpha ={1.5})")
+plt.axis('off')
+
+plt.subplot(2, 2, 4)
+plt.imshow(wls_filter_gray(img, 8, 1.5, 1e-4), cmap='jet', vmin=0, vmax=1)
+plt.title(f"Couche de base (lambda={8} et alpha ={1.5})")
+plt.axis('off')
+
+plt.show()
+
+
+#affichage avec couche de détails
+img_base = wls_filter_gray(img, lamb=0.5, alpha=1.5, eps=1e-4)
+
+#extrait de la couche de détails (d = g - u)
+couche_detail_1 = img - img_base
+
+plt.figure(figsize=(10, 5))
+
+
+plt.subplot(1, 2, 1)
+plt.imshow(img_base, cmap='gray', vmin=0, vmax=1) #en gris sinon pas beau
+plt.title("Couche de base")
+plt.axis('off')
+
+
+plt.subplot(1, 2, 2)
+plt.imshow(couche_detail_1 + 0.5, cmap='gray', vmin=0, vmax=1) #+0.5 pour eviter le plus de valeurs negatives (si d'autres sont en dehors de 0 et 1 apres ça, elles seront gérées par vmin et vmax)
+plt.title("Couche de détails 1")
+plt.axis('off')
+
 plt.show()
