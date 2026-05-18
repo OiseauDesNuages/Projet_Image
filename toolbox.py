@@ -53,8 +53,8 @@ def comparer_gradients(img_original, Dx, Dy):
     img_gray_dy = np.vstack((img_gray[:-1, :] - img_gray[1:, :], zero_lig)) 
 
     # 3. Vérification de la précision (arrondi à 10^-6)
-    verif_Dx = np.around(grad_x_2D.astype(np.double), 6) == np.around(img_gray_dx.astype(np.double), 6)
-    verif_Dy = np.around(grad_y_2D.astype(np.double), 6) == np.around(img_gray_dy.astype(np.double), 6)
+    verif_Dx = grad_x_2D.astype(np.double) == img_gray_dx.astype(np.double)
+    verif_Dy = grad_y_2D.astype(np.double) == img_gray_dy.astype(np.double)
 
     # 4. Affichage
     fig, axes = plt.subplots(2, 3, figsize=(15, 8))
@@ -137,4 +137,60 @@ def WLS_RGB(img_original, Dx, Dy, alpha, eps, lamb):
 
     return img_lisse
 
+def Tone_Mapping_iter(image, list_lamb):
+    # Méthode itérative
+    n, m, c = image.shape
+    Dx, Dy = build_Dx_Dy(image)
+    Dx = Dx.tocsr()
+    Dy = Dy.tocsr()
 
+    list_img = np.zeros((n, m, c, len(list_lamb)))
+
+    for i in range(len(list_lamb)):
+        list_img[:,:,:,i] = WLS_RGB(image, Dx, Dy, alpha=1.2, eps=1e-4, lamb=list_lamb[i])
+    
+    u = image
+    d1 = list_img[:,:,:,0]
+    d2 = list_img[:,:,:,1]
+    d3 = list_img[:,:,:,2]
+
+    kc = 0.75
+    km = 0.75
+    kf = 0.75
+
+    base = d3
+    coarse = d3 + kc*(d2-d3) 
+    medium = coarse + km*(d1-d2)
+    fine = medium + kf*(u-d1)
+
+    return base, coarse, medium, fine
+
+def Tone_Mapping_rec(image):
+    n, m, c = image.shape
+    Dx, Dy = build_Dx_Dy(image)
+    Dx = Dx.tocsr()
+    Dy = Dy.tocsr()
+
+    list_img = np.zeros((n, m, c, 3))
+
+    list_img[:,:,:,0] = WLS_RGB(image, Dx, Dy, alpha=1.2, eps=1e-4, lamb=1)
+
+    for i in range(1, 3):
+        img_intermediaire = list_img[:,:,:,i-1].copy().astype(np.float32)
+        list_img[:,:,:,i] = WLS_RGB(img_intermediaire, Dx, Dy, alpha=1.2, eps=1e-4, lamb=1)
+
+    u = image
+    d1 = list_img[:,:,:,0]
+    d2 = list_img[:,:,:,1]
+    d3 = list_img[:,:,:,2]
+
+    kc = 0.75
+    km = 0.75
+    kf = 0.75
+
+    base = d3
+    coarse = d3 + kc*(d2-d3) 
+    medium = coarse + km*(d1-d2)
+    fine = medium + kf*(u-d1)
+
+    return base, coarse, medium, fine
