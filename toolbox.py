@@ -194,3 +194,41 @@ def Tone_Mapping_rec(image):
     fine = medium + kf*(u-d1)
 
     return base, coarse, medium, fine
+
+def dessiner_contours_noirs(image, chemin_sortie="image_contours.jpg"):
+
+    # 2. Convertir en niveaux de gris (nécessaire pour la détection de contours)
+    image_gris = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # 3. Appliquer un flou gaussien pour réduire le bruit et améliorer la détection
+    flou = cv2.GaussianBlur(image_gris, (5, 5), 0)
+
+    # 4. Détecter les contours avec l'algorithme de Canny
+    # Vous pouvez ajuster les seuils (100 et 200) selon vos besoins
+    contours_canny = cv2.Canny(flou, 30, 80)
+
+    # 5. Trouver les contours vectoriels à partir de l'image Canny
+    contours, _ = cv2.findContours(contours_canny, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # 6. Dessiner les contours en noir sur l'image d'origine
+    # Le paramètre (0, 0, 0) correspond à la couleur noire en BGR
+    # Le dernier paramètre (ici 2) est l'épaisseur du trait en pixels
+    image_contours = image.copy()
+    cv2.drawContours(image_contours, contours, -1, (0, 0, 0), thickness=2)
+
+    # 7. Sauvegarder et afficher le résultat
+    cv2.imwrite(chemin_sortie, image_contours)
+
+    return image_contours
+
+def recombine_multiscale(image_orig, base1, base2, base3, lf, lm, lc):
+
+    """
+    Recombine les couches de détails avec des poids spécifiques.
+    - image_orig - base1 : Détails très fins (textures)
+    - base1 - base2      : Détails moyens (traits)
+    - base2 - base3      : Détails grossiers (ombres globales)
+    """
+    res = base3 + lc*(base2 - base3) + lm*(base1 - base2) + lf*(image_orig - base1)
+    return np.clip(res, 0.0, 1.0) # On intègre la sécurité pour rester dans [0, 1]
+
